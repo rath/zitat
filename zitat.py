@@ -129,6 +129,23 @@ def step_download(url, tmpdir, start="0", duration=None):
     return output
 
 
+def step_local(path, tmpdir, start="0", duration=None):
+    """Step 1 (local file): Use video as-is, or cut the requested section."""
+    needs_clip = start != "0" or duration is not None
+    if not needs_clip:
+        print("[1/6] Using local video file")
+        return path
+    print("[1/6] Cutting local video segment...")
+    output = os.path.join(tmpdir, "source.mp4")
+    cmd = ["ffmpeg", "-y", "-ss", str(parse_time(start)), "-i", path]
+    if duration is not None:
+        cmd += ["-t", str(parse_time(duration))]
+    # Re-encode for frame-accurate cuts (mirrors --force-keyframes-at-cuts)
+    cmd += ["-c:v", "libx264", "-c:a", "aac", output]
+    run(cmd, "cut")
+    return output
+
+
 def step_audio(clip, tmpdir):
     """Step 2: Extract audio."""
     print("[2/6] Extracting audio...")
@@ -217,7 +234,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="zitat — YouTube clip Korean subtitle pipeline",
     )
-    parser.add_argument("url", help="YouTube URL")
+    parser.add_argument("url", help="YouTube URL or local video file")
     parser.add_argument("-ss", "--start", default="0", help="Start time (ffmpeg format)")
     parser.add_argument("-t", "--duration", default=None, help="Duration (seconds or ffmpeg format)")
     parser.add_argument("-o", "--output", default=None, help="Output filename (without .mp4)")
@@ -239,7 +256,14 @@ def main():
     whisper_bin = os.path.expanduser(whisper_bin)
     whisper_model = os.path.expanduser(whisper_model)
 
-    video_id = extract_video_id(args.url)
+    local_path = os.path.abspath(os.path.expanduser(args.url))
+    if not os.path.isfile(local_path):
+        local_path = None
+
+    if local_path:
+        video_id = os.path.splitext(os.path.basename(local_path))[0]
+    else:
+        video_id = extract_video_id(args.url)
     output_name = args.output or f"{video_id}_ko"
     if not output_name.endswith(".mp4"):
         output_name += ".mp4"
@@ -249,7 +273,10 @@ def main():
     print(f"Temp dir: {tmpdir}")
 
     try:
-        source = step_download(args.url, tmpdir, args.start, args.duration)
+        if local_path:
+            source = step_local(local_path, tmpdir, args.start, args.duration)
+        else:
+            source = step_download(args.url, tmpdir, args.start, args.duration)
         audio = step_audio(source, tmpdir)
         srt = step_whisper(audio, tmpdir, whisper_bin, whisper_model)
         translated = step_translate(srt, args.lang, tmpdir)
