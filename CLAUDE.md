@@ -64,3 +64,7 @@ Settings are managed via `.env` file (same directory as script). Priority: CLI o
 - `format_srt()` always renumbers from 1, which is why entry indices are never validated
 - Translation sends numbered plain-text lines and re-attaches the **source** timecodes,
   so timecode drift is structurally impossible; only index coverage is validated
+- `wrap_text()` is greedy, which strips the remainder onto the last line and leaves
+  three-syllable orphans on screen alone. `rebalance_lines()` re-wraps at the narrowest
+  budget that yields the same line count, which is the most even one. It can only make
+  lines narrower, so it never breaks the width budget or the line-count cap.

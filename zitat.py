@@ -415,6 +415,25 @@ def wrap_text(text, budget):
     return lines or [text.strip()]
 
 
+def rebalance_lines(text, budget, lines):
+    """Even out line widths without increasing the line count."""
+    # Greedy wrapping fills the early lines and strips the remainder onto the
+    # last one, which is what leaves a three-syllable orphan alone on screen.
+    # The narrowest budget that still yields the same number of lines is the
+    # most even one, and it can only ever be narrower than what we started with.
+    n = len(lines)
+    words = text.split()
+    if n < 2 or not words:
+        return lines
+    floor = max(-(-display_width(text) // n),
+                max(display_width(w) for w in words))
+    for target in range(floor, budget):
+        candidate = wrap_text(text, target)
+        if len(candidate) <= n:
+            return candidate
+    return lines
+
+
 def wrap_to_max_lines(text, budget, max_lines):
     """Wrap text, widening the budget until the chunk count fits."""
     max_lines = max(1, max_lines)
@@ -424,7 +443,7 @@ def wrap_to_max_lines(text, budget, max_lines):
     while len(lines) > max_lines:
         budget += 2
         lines = wrap_text(text, budget)
-    return lines
+    return rebalance_lines(text, budget, lines)
 
 
 def split_cue(start, end, text, max_width, min_ms):
