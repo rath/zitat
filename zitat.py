@@ -382,8 +382,20 @@ def hard_break(token, budget):
     return pieces
 
 
-def wrap_text(text, budget):
-    """Greedy whitespace wrap to a display-column budget."""
+def explode_atoms(atoms, budget):
+    """Break multi-word atoms that cannot fit the budget back into words."""
+    out = []
+    for atom in atoms:
+        if " " in atom and display_width(atom) > budget:
+            out.extend(atom.split())
+        else:
+            out.append(atom)
+    return out
+
+
+def wrap_atoms(atoms, budget):
+    """Greedy wrap of atoms (words or phrase segments) to a column budget."""
+    atoms = explode_atoms(atoms, budget)
     lines, current, width = [], [], 0
 
     def flush():
@@ -392,61 +404,71 @@ def wrap_text(text, budget):
             lines.append(" ".join(current))
             current, width = [], 0
 
-    for token in text.split():
-        token_width = display_width(token)
-        if token_width > budget:
+    for atom in atoms:
+        atom_width = display_width(atom)
+        if atom_width > budget:
             flush()
-            pieces = hard_break(token, budget) if any(
-                char_width(ch) == 2 for ch in token) else [token]
+            pieces = hard_break(atom, budget) if any(
+                char_width(ch) == 2 for ch in atom) else [atom]
             # CJK breaks legally anywhere; a long Latin run is left whole and
             # allowed to overflow, since mid-word breaks read worse than a long
             # line and libass still wraps it as a safety net.
             lines.extend(pieces[:-1])
             current, width = [pieces[-1]], display_width(pieces[-1])
             continue
-        added = token_width if not current else token_width + 1
+        added = atom_width if not current else atom_width + 1
         if width + added > budget:
             flush()
-            current, width = [token], token_width
+            current, width = [atom], atom_width
         else:
-            current.append(token)
+            current.append(atom)
             width += added
     flush()
-    return lines or [text.strip()]
+    return lines
 
 
-def rebalance_lines(text, budget, lines):
+def wrap_text(text, budget):
+    """Greedy whitespace wrap to a display-column budget."""
+    return wrap_atoms(text.split(), budget) or [text.strip()]
+
+
+def rebalance_lines(atoms, budget, lines):
     """Even out line widths without increasing the line count."""
     # Greedy wrapping fills the early lines and strips the remainder onto the
     # last one, which is what leaves a three-syllable orphan alone on screen.
     # The narrowest budget that still yields the same number of lines is the
     # most even one, and it can only ever be narrower than what we started with.
     n = len(lines)
-    words = text.split()
-    if n < 2 or not words:
+    if n < 2 or not atoms:
         return lines
-    floor = max(-(-display_width(text) // n),
-                max(display_width(w) for w in words))
+    # The floor covers the widest atom, so no sweep target can explode a
+    # phrase segment back into words — narrowing must never reintroduce the
+    # mid-phrase breaks the marks removed.
+    floor = max(-(-display_width(" ".join(atoms)) // n),
+                max(display_width(a) for a in atoms))
     for target in range(floor, budget):
-        candidate = wrap_text(text, target)
+        candidate = wrap_atoms(atoms, target)
         if len(candidate) <= n:
             return candidate
     return lines
 
 
-def wrap_to_max_lines(text, budget, max_lines):
-    """Wrap text, widening the budget until the chunk count fits."""
+def wrap_to_max_lines(atoms, budget, max_lines):
+    """Wrap atoms, widening the budget until the chunk count fits."""
     max_lines = max(1, max_lines)
-    total = display_width(text)
+    total = display_width(" ".join(atoms))
     budget = max(budget, -(-total // max_lines))
-    lines = wrap_text(text, budget)
+    lines = wrap_atoms(atoms, budget)
     while len(lines) > max_lines:
         budget += 2
-        lines = wrap_text(text, budget)
-    return rebalance_lines(text, budget, lines)
+        lines = wrap_atoms(atoms, budget)
+    # Rebalance over what actually got wrapped: an atom wider than the final
+    # budget was exploded into words, and the unexploded original would push
+    # the floor past the budget and silently skip rebalancing.
+    return rebalance_lines(explode_atoms(atoms, budget), budget, lines)
 
 
-def split_cue(start, end, text, max_width, min_ms):
+def split_cue(start, end, text, max_width, min_ms, segments=None):
     """Split one cue into short single-line cues sharing its time span."""
     text = " ".join(text.split())
     if not text:
@@ -458,7 +480,8 @@ def split_cue(start, end, text, max_width, min_ms):
     # Cap the chunk count first so a dense cue widens its lines instead of
     # producing a flicker-storm. This makes n * min_ms <= total an invariant.
     max_lines = total // min_ms if min_ms > 0 else len(text)
-    chunks = wrap_to_max_lines(text, max_width, max_lines)
+    atoms = segments if segments else text.split()
+    chunks = wrap_to_max_lines(atoms, max_width, max_lines)
     n = len(chunks)
     if n == 1:
         return [(start, end, chunks[0])]
@@ -486,11 +509,13 @@ def split_cue(start, end, text, max_width, min_ms):
     return [(bounds[i], bounds[i + 1], chunks[i]) for i in range(n)]
 
 
-def split_cues(cues, max_width, min_ms):
+def split_cues(cues, max_width, min_ms, segments_by_index=None):
     """Split every cue to the display-width budget."""
+    segments_by_index = segments_by_index or {}
     out = []
-    for start, end, text in cues:
-        out.extend(split_cue(start, end, text, max_width, min_ms))
+    for i, (start, end, text) in enumerate(cues):
+        out.extend(split_cue(start, end, text, max_width, min_ms,
+                             segments_by_index.get(i)))
     return out
 
 
