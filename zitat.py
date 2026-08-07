@@ -26,6 +26,11 @@ SRT_TIME_RE = re.compile(
 # "12<TAB>text", "12. text", "12) text", "12: text", "12 text"
 NUMBERED_RE = re.compile(r"^\s*(\d+)[\t ]*[.:|)\-]?[\t ]*(\S.*?)\s*$")
 
+# Strict echo of the numbered contract. NUMBERED_RE's separator class would
+# eat a leading '.', '-' or '|' out of the text itself, which breaks the
+# equality gate on phrase-marked lines, so marking tries this parse first.
+MARK_TAB_RE = re.compile(r"^\s*(\d+)\t[\t ]*(\S.*?)\s*$")
+
 FENCE_RE = re.compile(r"^```[a-zA-Z]*$")
 
 SENTENCE_END = (".", "?", "!", "。", "？", "！")
@@ -73,8 +78,8 @@ def env_int(name, fallback):
         sys.exit(1)
 
 
-def run(cmd, desc, capture=False, env=None, stdin_text=None):
-    """Run a subprocess command with error handling."""
+def run(cmd, desc, capture=False, env=None, stdin_text=None, fatal=True):
+    """Run a subprocess command. Non-fatal failures warn and return None."""
     shown = [a if len(a) <= 80 else a[:77] + "..." for a in cmd]
     print(f"  $ {' '.join(shown)}")
     try:
@@ -88,13 +93,19 @@ def run(cmd, desc, capture=False, env=None, stdin_text=None):
         )
         return result
     except FileNotFoundError:
-        print(f"  ERROR: '{cmd[0]}' not found. Is it installed?", file=sys.stderr)
-        sys.exit(1)
+        if fatal:
+            print(f"  ERROR: '{cmd[0]}' not found. Is it installed?", file=sys.stderr)
+            sys.exit(1)
+        print(f"  WARNING: '{cmd[0]}' not found; skipping {desc}")
+        return None
     except subprocess.CalledProcessError as e:
-        print(f"  ERROR: {desc} failed (exit {e.returncode})", file=sys.stderr)
-        if e.stderr:
-            print(e.stderr, file=sys.stderr)
-        sys.exit(1)
+        if fatal:
+            print(f"  ERROR: {desc} failed (exit {e.returncode})", file=sys.stderr)
+            if e.stderr:
+                print(e.stderr, file=sys.stderr)
+            sys.exit(1)
+        print(f"  WARNING: {desc} failed (exit {e.returncode}); continuing without it")
+        return None
 
 
 def extract_video_id(url):
@@ -519,6 +530,20 @@ def split_cues(cues, max_width, min_ms, segments_by_index=None):
     return out
 
 
+def needs_marks(start, end, text, max_width, min_ms):
+    """Whether a cue will actually split and can honour phrase marks."""
+    text = " ".join(text.split())
+    total = end - start
+    # Mirror split_cue's early return exactly: these cues pass through whole.
+    if total <= 0 or display_width(text) <= max_width:
+        return False
+    # max_lines caps at one chunk, so marks could never take effect.
+    if min_ms > 0 and total < 2 * min_ms:
+        return False
+    # A literal pipe would make the marked echo ambiguous to parse.
+    return "|" not in text
+
+
 def bridge_gaps(cues, bridge_ms):
     """Hold a cue until the next one starts unless a real pause separates them."""
     # Cue ends sit on the last word, so anything short of a real pause shows up
@@ -645,12 +670,25 @@ def step_whisper(audio, tmpdir, whisper_bin, whisper_model, dtw, max_len):
     return output_stem + ".srt", output_stem + ".json"
 
 
-def translate_texts(texts, lang, env):
-    """Translate numbered lines via claude; returns {1-based index: translation}."""
+def claude_env():
+    """Environment for claude subprocess calls."""
+    # Filter out CLAUDE_CODE_ENTRYPOINT to avoid nested execution issues
+    return {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_ENTRYPOINT"}
+
+
+def numbered_call(texts, prompt, desc, env, fatal=True):
+    """Send numbered lines to claude on stdin; returns stdout or None."""
     # One line per entry is the whole contract, so a multi-line cue from the
     # SRT fallback path must be flattened before it corrupts the numbering.
     payload = "\n".join(f"{i}\t{' '.join(text.split())}"
                         for i, text in enumerate(texts, 1))
+    result = run(["claude", "-p", prompt], desc,
+                 capture=True, env=env, stdin_text=payload, fatal=fatal)
+    return None if result is None else result.stdout
+
+
+def translate_texts(texts, lang, env):
+    """Translate numbered lines via claude; returns {1-based index: translation}."""
     n = len(texts)
     prompt = (
         f"stdin으로 번호가 매겨진 자막 줄들을 받는다. 각 줄은 '번호<TAB>원문' 형식이다. "
@@ -663,11 +701,10 @@ def translate_texts(texts, lang, env):
         "- 번역문 외에 설명이나 코드 펜스를 붙이지 않는다.\n"
         "- 앞뒤 항목이 이어지는 한 문장일 수 있으니 전체 맥락을 보고 번역한다."
     )
-    result = run(["claude", "-p", prompt], "translation",
-                 capture=True, env=env, stdin_text=payload)
+    stdout = numbered_call(texts, prompt, "translation", env)
 
     out = {}
-    for line in result.stdout.splitlines():
+    for line in stdout.splitlines():
         line = line.strip()
         if not line or FENCE_RE.match(line):
             continue
@@ -677,11 +714,96 @@ def translate_texts(texts, lang, env):
     return out
 
 
+MARK_PROMPT = (
+    "stdin으로 번호가 매겨진 자막 줄들을 받는다. 각 줄은 '번호<TAB>문장' 형식이다. "
+    "각 문장 안에, 자막이 여기서 끊겨도 자연스러운 지점마다 '|'를 삽입해.\n"
+    "규칙:\n"
+    "- 출력은 입력과 글자 하나까지 동일해야 하며 '|' 삽입만 허용된다.\n"
+    "- '|'는 단어 사이(공백 위치)에만 넣는다.\n"
+    "- 의미 단위(구)가 끝나는 곳마다 촘촘히(2~4어절 간격) 넣는다.\n"
+    "- 수식어와 수식받는 말 사이는 절대 나누지 않는다.\n"
+    "- '번호<TAB>결과' 형식으로, 항목을 합치거나 나누거나 빼지 말고 "
+    "한 항목은 한 줄로 출력한다.\n"
+    "- 설명이나 코드 펜스를 붙이지 않는다."
+)
+
+
+def mark_segments(line, original):
+    """Validate one marked line against its original; segments or None."""
+    segments = [" ".join(s.split()) for s in line.split("|")]
+    segments = [s for s in segments if s]
+    # The equality gate is the whole safety story: it forces every mark onto
+    # an existing word boundary and rejects any other edit. A markless echo
+    # passes it but adds nothing, so it goes to the retry instead.
+    if len(segments) > 1 and " ".join(segments) == original:
+        return segments
+    return None
+
+
+def parse_marks(stdout, originals):
+    """Parse marked lines; keeps the first candidate that survives validation.
+
+    originals maps 1-based payload index to normalized text. Returns
+    {index: [segments]}.
+    """
+    out = {}
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line or FENCE_RE.match(line):
+            continue
+        for m in (MARK_TAB_RE.match(line), NUMBERED_RE.match(line)):
+            if not m:
+                continue
+            index = int(m.group(1))
+            # Keep-first: a later garbage line (say, a wrapped continuation
+            # starting with a numeral) must not hijack a validated slot.
+            if index in out or index not in originals:
+                continue
+            segments = mark_segments(m.group(2), originals[index])
+            if segments:
+                out[index] = segments
+                break
+    return out
+
+
+def mark_texts(texts_by_index, env, batch_size):
+    """Ask claude to mark phrase boundaries; returns {cue index: [segments]}."""
+    indices = sorted(texts_by_index)
+    normalized = {i: " ".join(texts_by_index[i].split()) for i in indices}
+    out = {}
+    size = batch_size if batch_size > 0 else len(indices)
+
+    def request(batch):
+        stdout = numbered_call([normalized[i] for i in batch], MARK_PROMPT,
+                               "phrase marking", env, fatal=False)
+        if stdout is None:
+            return
+        originals = {k: normalized[i] for k, i in enumerate(batch, 1)}
+        for k, segments in parse_marks(stdout, originals).items():
+            out[batch[k - 1]] = segments
+
+    for offset in range(0, len(indices), size):
+        request(indices[offset:offset + size])
+
+    # One retry covers missing and validation-failed lines alike; whatever
+    # still fails degrades per-line to plain width splitting.
+    failed = [i for i in indices if i not in out]
+    if failed:
+        request(failed)
+        failed = [i for i in indices if i not in out]
+    if failed:
+        print(f"  NOTE: {len(failed)} cue(s) unmarked; splitting by width alone")
+    return out
+
+
 def step_translate(cues, lang, tmpdir, batch_size, allow_partial):
-    """Step 4: Translate cue text, keeping the source timecodes authoritative."""
+    """Step 4: Translate cue text, keeping the source timecodes authoritative.
+
+    Returns the translated cues plus the indices left untranslated, so later
+    stages can treat the placeholder (source-language) cues differently.
+    """
     print("[4/7] Translating subtitles...")
-    # Filter out CLAUDE_CODE_ENTRYPOINT to avoid nested execution issues
-    env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CODE_ENTRYPOINT"}
+    env = claude_env()
 
     texts = [text for _, _, text in cues]
     total = len(texts)
@@ -732,13 +854,20 @@ def step_translate(cues, lang, tmpdir, batch_size, allow_partial):
     with open(path, "w") as f:
         f.write(format_srt(out))
     print(f"  Translated SRT written to {path}")
-    return out
+    return out, set(missing)
 
 
-def step_split(cues, max_width, min_ms, bridge_ms):
+def step_split(cues, max_width, min_ms, bridge_ms, marker=None):
     """Step 5: Split translated cues into short single-line cues."""
     print("[5/7] Splitting cues...")
-    out = normalize_cues(split_cues(cues, max_width, min_ms))
+    segments_by_index = {}
+    if marker:
+        eligible = {i: text for i, (start, end, text) in enumerate(cues)
+                    if needs_marks(start, end, text, max_width, min_ms)}
+        if eligible:
+            print(f"  marking phrase boundaries in {len(eligible)} cue(s)...")
+            segments_by_index = marker(eligible)
+    out = normalize_cues(split_cues(cues, max_width, min_ms, segments_by_index))
     print(f"  {len(cues)} cues -> {len(out)} cues")
 
     if bridge_ms > 0:
@@ -822,6 +951,8 @@ def main():
     parser.add_argument("--dtw", default=None, help="whisper DTW preset (default: derived from model name)")
     parser.add_argument("--no-dtw", action="store_true", help="Disable DTW word timestamps")
     parser.add_argument("--no-split", action="store_true", help="Skip cue splitting")
+    parser.add_argument("--no-phrase-marks", action="store_true",
+                        help="Split by width alone, without claude phrase marking")
     parser.add_argument("--no-review", action="store_true", help="Skip subtitle review step")
     parser.add_argument("--keep-tmp", action="store_true", help="Keep temporary files")
 
@@ -903,13 +1034,24 @@ def main():
             print("ERROR: no speech detected", file=sys.stderr)
             sys.exit(1)
 
-        cues = step_translate(cues, args.lang, tmpdir, translate_batch,
-                              allow_partial=not args.no_review)
+        cues, untranslated = step_translate(cues, args.lang, tmpdir, translate_batch,
+                                            allow_partial=not args.no_review)
 
         if args.no_split:
             print("[5/7] Skipping cue splitting")
         else:
-            cues = step_split(cues, max_width, min_cue_ms, bridge_gap_ms)
+            marker = None
+            if not args.no_phrase_marks:
+                def marker(eligible):
+                    # Placeholder cues still hold source-language text; a
+                    # phrase-boundary prompt has nothing to say about them.
+                    eligible = {i: t for i, t in eligible.items()
+                                if i not in untranslated}
+                    segments = mark_texts(eligible, claude_env(), translate_batch)
+                    with open(os.path.join(tmpdir, "marks.json"), "w") as f:
+                        json.dump(segments, f, ensure_ascii=False, indent=1)
+                    return segments
+            cues = step_split(cues, max_width, min_cue_ms, bridge_gap_ms, marker)
 
         final = os.path.join(tmpdir, "final.srt")
         with open(final, "w") as f:

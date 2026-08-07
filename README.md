@@ -71,6 +71,7 @@ python zitat.py <youtube-url> [옵션]
 | `--max-cue-ms` | `5000` | `ZITAT_MAX_CUE_MS` | 원문 큐 최대 길이(ms) |
 | `--bridge-gap-ms` | `1500` | `ZITAT_BRIDGE_GAP_MS` | 이 길이 이하의 간격은 메워서 자막을 유지(ms). `0`이면 비활성 |
 | `--no-split` | — | — | 5단계 전체(재분할 + 간격 메우기) 건너뛰기 |
+| `--no-phrase-marks` | — | — | claude 구 경계 표시 없이 표시 폭만으로 재분할 |
 | `--translate-batch` | `80` | `ZITAT_TRANSLATE_BATCH` | claude 호출당 큐 수. `0`이면 배치 안 함 |
 | `--font` | `BM Dohyeon` | `ZITAT_FONT` | 자막 폰트 |
 | `--font-size` | `22` | `ZITAT_FONT_SIZE` | 자막 크기 |
@@ -102,6 +103,19 @@ python zitat.py <url> --max-width 40
 ```bash
 python zitat.py <url> --max-cue-ms 3000
 ```
+
+### 구 경계 분할
+
+분할기는 공백 기준이라 그대로 두면 "경험을 쌓은 뒤에 한 / 두 번째 일은"처럼 수식어와
+피수식어 사이가 큐 경계로 갈라질 수 있다. 그래서 5단계는 자르기 전에 claude를 한 번 더
+불러 번역문의 자연스러운 구 경계에 `|`를 표시하게 하고, 표시된 지점에서만 자른다.
+
+표시 결과는 검증을 통과해야만 쓰인다. `|`를 떼고 다시 합친 결과가 원문과 정확히
+일치해야 하므로, 텍스트 변형이나 어절 중간 절단은 구조적으로 불가능하다. 검증에 실패한
+줄과 claude 호출 실패는 해당 줄만 폭 기준 분할로 조용히 열화된다 — 최악의 경우가 이
+기능이 없던 때의 동작이다.
+
+claude 호출이 한 번 늘어난다. 원치 않으면 `--no-phrase-marks`.
 
 ### 자막 사이 간격
 
@@ -166,7 +180,7 @@ YouTube URL
 [4] claude CLI 자막 번역 (번호 매긴 텍스트 왕복, 타임코드는 원본 유지)
   │
   ▼
-[5] 자막 재분할 (표시 폭 기준, --no-split으로 건너뛰기)
+[5] 자막 재분할 (claude 구 경계 표시 → 표시 폭 기준, --no-split으로 건너뛰기)
   │
   ▼
 [6] $EDITOR 자막 검수 (--no-review로 건너뛰기)
