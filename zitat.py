@@ -781,7 +781,7 @@ def main():
     parser.add_argument("--max-width", type=int, default=None,
                         help="Max display columns per cue, CJK counts 2 (default: 30)")
     parser.add_argument("--min-cue-ms", type=int, default=None,
-                        help="Minimum cue duration in ms, 0 to disable (default: 1500)")
+                        help="Minimum cue duration in ms, 0 to disable (default: 800)")
     parser.add_argument("--pause-gap-ms", type=int, default=None,
                         help="Word gap that starts a new source cue (default: 400)")
     parser.add_argument("--max-cue-ms", type=int, default=None,
