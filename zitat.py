@@ -781,13 +781,13 @@ def main():
     parser.add_argument("--max-width", type=int, default=None,
                         help="Max display columns per cue, CJK counts 2 (default: 30)")
     parser.add_argument("--min-cue-ms", type=int, default=None,
-                        help="Minimum cue duration in ms, 0 to disable (default: 800)")
+                        help="Minimum cue duration in ms, 0 to disable (default: 1500)")
     parser.add_argument("--pause-gap-ms", type=int, default=None,
                         help="Word gap that starts a new source cue (default: 400)")
     parser.add_argument("--max-cue-ms", type=int, default=None,
                         help="Maximum source cue length in ms (default: 5000)")
     parser.add_argument("--bridge-gap-ms", type=int, default=None,
-                        help="Hold a cue across gaps up to this long, 0 to disable (default: 800)")
+                        help="Hold a cue across gaps up to this long, 0 to disable (default: 1500)")
     parser.add_argument("--translate-batch", type=int, default=None,
                         help="Cues per claude call, 0 to never batch (default: 80)")
     parser.add_argument("--whisper-bin", default=None, help="Path to whisper-cli (default: $WHISPER_BIN or 'whisper-cli')")
@@ -815,7 +815,7 @@ def main():
     min_cue_ms = args.min_cue_ms if args.min_cue_ms is not None else env_int("ZITAT_MIN_CUE_MS", 800)
     pause_gap_ms = args.pause_gap_ms if args.pause_gap_ms is not None else env_int("ZITAT_PAUSE_GAP_MS", 400)
     max_cue_ms = args.max_cue_ms if args.max_cue_ms is not None else env_int("ZITAT_MAX_CUE_MS", 5000)
-    bridge_gap_ms = args.bridge_gap_ms if args.bridge_gap_ms is not None else env_int("ZITAT_BRIDGE_GAP_MS", 800)
+    bridge_gap_ms = args.bridge_gap_ms if args.bridge_gap_ms is not None else env_int("ZITAT_BRIDGE_GAP_MS", 1500)
     translate_batch = args.translate_batch if args.translate_batch is not None else env_int("ZITAT_TRANSLATE_BATCH", 80)
     whisper_max_len = args.whisper_max_len if args.whisper_max_len is not None else env_int("ZITAT_WHISPER_MAX_LEN", 0)
     font = args.font if args.font is not None else env_str("ZITAT_FONT", "BM Dohyeon")
