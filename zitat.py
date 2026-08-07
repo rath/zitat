@@ -709,7 +709,9 @@ def translate_texts(texts, lang, env):
         if not line or FENCE_RE.match(line):
             continue
         m = NUMBERED_RE.match(line)
-        if m:
+        # Keep-first: a translation wrapped onto a second physical line that
+        # happens to start with a numeral must not overwrite a real entry.
+        if m and int(m.group(1)) not in out:
             out[int(m.group(1))] = m.group(2)
     return out
 
