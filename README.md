@@ -54,8 +54,10 @@ WHISPER_MODEL=~/whisper.cpp/models/ggml-large-v3-turbo.bin
 ## 사용법
 
 ```bash
-python zitat.py <youtube-url> [옵션]
+python -m zitat <youtube-url> [옵션]
 ```
+
+저장소 루트에서 실행합니다 (`.env`도 루트에서 읽습니다).
 
 ### 옵션
 
@@ -90,10 +92,10 @@ python zitat.py <youtube-url> [옵션]
 
 ```bash
 # 더 짧고 빠르게 (쇼츠 스타일)
-python zitat.py <url> --max-width 22 --min-cue-ms 600
+python -m zitat <url> --max-width 22 --min-cue-ms 600
 
 # 더 길게, 전환은 적게
-python zitat.py <url> --max-width 40
+python -m zitat <url> --max-width 40
 ```
 
 자막 **내용**은 맞는데 **나오는 시점**이 어긋난다면 `--max-width`가 아니라
@@ -101,7 +103,7 @@ python zitat.py <url> --max-width 40
 나눠 갖기 때문에, 원문 큐가 길수록 어긋남이 커진다.
 
 ```bash
-python zitat.py <url> --max-cue-ms 3000
+python -m zitat <url> --max-cue-ms 3000
 ```
 
 ### 구 경계 분할
@@ -126,10 +128,10 @@ claude 호출이 한 번 늘어난다. 원치 않으면 `--no-phrase-marks`.
 
 ```bash
 # 쉼의 리듬을 더 남김 (공백이 자주 보임)
-python zitat.py <url> --bridge-gap-ms 800
+python -m zitat <url> --bridge-gap-ms 800
 
 # 메우지 않음 — 발화 구간에만 정확히 표시
-python zitat.py <url> --bridge-gap-ms 0
+python -m zitat <url> --bridge-gap-ms 0
 ```
 
 247초 인터뷰 클립에서 측정한 값이다. 이 클립의 가장 긴 간격이 1630ms라, 임계값을
@@ -149,16 +151,16 @@ python zitat.py <url> --bridge-gap-ms 0
 
 ```bash
 # 영상 처음 50초를 한국어 자막과 함께 추출
-python zitat.py "https://youtu.be/j190mwiVlwA" -ss 0 -t 50 -o peter_test
+python -m zitat "https://youtu.be/j190mwiVlwA" -ss 0 -t 50 -o peter_test
 
 # 1분 30초부터 2분간, 일본어로 번역
-python zitat.py "https://youtu.be/j190mwiVlwA" -ss 1:30 -t 120 --lang Japanese
+python -m zitat "https://youtu.be/j190mwiVlwA" -ss 1:30 -t 120 --lang Japanese
 
 # 영상 전체를 다운로드해서 자막 입히기
-python zitat.py "https://youtu.be/j190mwiVlwA"
+python -m zitat "https://youtu.be/j190mwiVlwA"
 
 # 중간 파일 확인하면서 디버깅
-python zitat.py "https://youtu.be/j190mwiVlwA" -t 30 --keep-tmp
+python -m zitat "https://youtu.be/j190mwiVlwA" -t 30 --keep-tmp
 ```
 
 ## 파이프라인

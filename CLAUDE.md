@@ -1,11 +1,19 @@
 # zitat
 
-YouTube clip subtitle pipeline. Single file `zitat.py`, stdlib only, no external packages.
+YouTube clip subtitle pipeline. Stdlib only, no external packages. Run with
+`python -m zitat` from the repo root.
 
 ## Structure
 
 ```
-zitat.py          # Entire pipeline (stdlib only)
+zitat/
+  __main__.py     # python -m zitat entry point
+  cli.py          # argparse, config resolution (CLI > env > .env), pipeline wiring
+  util.py         # load_dotenv (reads .env from the repo root), run(), env helpers
+  subs.py         # cue model: SRT parse/format, display-width split, gap bridging
+  words.py        # whisper JSON -> word timings -> clause-level source cues
+  claude.py       # claude -p contracts: numbered-line translation + phrase marking
+  steps.py        # the seven pipeline steps + libass burn style
 ```
 
 ## Pipeline (7 steps)
@@ -22,7 +30,7 @@ zitat.py          # Entire pipeline (stdlib only)
 
 ## Configuration
 
-Settings are managed via `.env` file (same directory as script). Priority: CLI options > shell env vars > `.env`.
+Settings are managed via `.env` file (repo root). Priority: CLI options > shell env vars > `.env`.
 
 ## External tools
 
