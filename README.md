@@ -69,7 +69,8 @@ python zitat.py <youtube-url> [옵션]
 | `--min-cue-ms` | `800` | `ZITAT_MIN_CUE_MS` | 큐 최소 표시 시간(ms). `0`이면 비활성 |
 | `--pause-gap-ms` | `400` | `ZITAT_PAUSE_GAP_MS` | 이 이상 벌어지면 원문 큐를 나눔(ms) |
 | `--max-cue-ms` | `5000` | `ZITAT_MAX_CUE_MS` | 원문 큐 최대 길이(ms) |
-| `--no-split` | — | — | 자막 재분할 건너뛰기 |
+| `--bridge-gap-ms` | `800` | `ZITAT_BRIDGE_GAP_MS` | 이 길이 이하의 간격은 메워서 자막을 유지(ms). `0`이면 비활성 |
+| `--no-split` | — | — | 5단계 전체(재분할 + 간격 메우기) 건너뛰기 |
 | `--translate-batch` | `80` | `ZITAT_TRANSLATE_BATCH` | claude 호출당 큐 수. `0`이면 배치 안 함 |
 | `--font` | `BM Dohyeon` | `ZITAT_FONT` | 자막 폰트 |
 | `--font-size` | `22` | `ZITAT_FONT_SIZE` | 자막 크기 |
@@ -101,6 +102,24 @@ python zitat.py <url> --max-width 40
 ```bash
 python zitat.py <url> --max-cue-ms 3000
 ```
+
+### 자막 사이 간격
+
+큐 끝은 마지막 단어에 맞춰 잘리기 때문에, 그대로 두면 진짜 묵음이 아닌 곳에서도
+자막이 잠깐씩 깜빡인다. `--bridge-gap-ms` 이하의 간격은 앞 자막을 다음 자막
+시작까지 유지해서 메우고, 그보다 긴 간격만 실제 공백으로 남긴다. 덤으로 읽을
+시간이 늘어난다.
+
+```bash
+# 간격을 더 적극적으로 메움 (화면에 거의 항상 자막이 있음)
+python zitat.py <url> --bridge-gap-ms 1200
+
+# 메우지 않음 — 발화 구간에만 정확히 표시
+python zitat.py <url> --bridge-gap-ms 0
+```
+
+기본값 `800`은 247초 인터뷰 클립에서 자막 표시 시간을 80.6% → 91.6%로 올리고
+(큐당 +13.6%), 800ms를 넘는 실제 쉼 18곳은 공백으로 남긴다.
 
 ### 예시
 

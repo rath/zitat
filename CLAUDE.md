@@ -50,6 +50,10 @@ Settings are managed via `.env` file (same directory as script). Priority: CLI o
   It only refines word onsets; spans always come from the token `offsets`.
 - Cue ends come from the **last word's** end, not the whisper segment end, which overshoots
   into the following silence.
+- Clamping to the last word leaves sub-pause gaps that read as flicker, so `bridge_gaps()`
+  holds a cue until the next one starts whenever the gap is `<= --bridge-gap-ms`. Only
+  longer gaps survive as real silence. This is also what buys reading time — proportional
+  allocation cannot create it.
 - Korean translation is distributed *within* a fixed cue span by display width. Word
   timings never map Korean 어절 to English words — SVO vs SOV makes that unsound.
 

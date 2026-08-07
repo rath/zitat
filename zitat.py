@@ -475,6 +475,20 @@ def split_cues(cues, max_width, min_ms):
     return out
 
 
+def bridge_gaps(cues, bridge_ms):
+    """Hold a cue until the next one starts unless a real pause separates them."""
+    # Cue ends sit on the last word, so anything short of a real pause shows up
+    # as a blink of blank screen. Holding through it also buys reading time,
+    # which is the one thing proportional allocation cannot create.
+    out = list(cues)
+    for i in range(len(out) - 1):
+        start, end, text = out[i]
+        nxt = out[i + 1][0]
+        if 0 < nxt - end <= bridge_ms:
+            out[i] = (start, nxt, text)
+    return out
+
+
 # --- Subtitle style --------------------------------------------------------
 
 
@@ -677,11 +691,20 @@ def step_translate(cues, lang, tmpdir, batch_size, allow_partial):
     return out
 
 
-def step_split(cues, max_width, min_ms):
+def step_split(cues, max_width, min_ms, bridge_ms):
     """Step 5: Split translated cues into short single-line cues."""
     print("[5/7] Splitting cues...")
     out = normalize_cues(split_cues(cues, max_width, min_ms))
     print(f"  {len(cues)} cues -> {len(out)} cues")
+
+    if bridge_ms > 0:
+        held = bridge_gaps(out, bridge_ms)
+        closed = sum(1 for a, b in zip(out, held) if a[1] != b[1])
+        gained = sum(b[1] - a[1] for a, b in zip(out, held))
+        if closed:
+            print(f"  closed {closed} gap(s) up to {bridge_ms}ms "
+                  f"(+{gained / 1000:.1f}s on screen)")
+        out = held
     # A cue too short to hold two readable chunks keeps one over-budget line,
     # which libass will wrap. Say so rather than letting it pass silently.
     wide = sum(1 for _, _, text in out if display_width(text) > max_width)
@@ -744,6 +767,8 @@ def main():
                         help="Word gap that starts a new source cue (default: 400)")
     parser.add_argument("--max-cue-ms", type=int, default=None,
                         help="Maximum source cue length in ms (default: 5000)")
+    parser.add_argument("--bridge-gap-ms", type=int, default=None,
+                        help="Hold a cue across gaps up to this long, 0 to disable (default: 800)")
     parser.add_argument("--translate-batch", type=int, default=None,
                         help="Cues per claude call, 0 to never batch (default: 80)")
     parser.add_argument("--whisper-bin", default=None, help="Path to whisper-cli (default: $WHISPER_BIN or 'whisper-cli')")
@@ -771,6 +796,7 @@ def main():
     min_cue_ms = args.min_cue_ms if args.min_cue_ms is not None else env_int("ZITAT_MIN_CUE_MS", 800)
     pause_gap_ms = args.pause_gap_ms if args.pause_gap_ms is not None else env_int("ZITAT_PAUSE_GAP_MS", 400)
     max_cue_ms = args.max_cue_ms if args.max_cue_ms is not None else env_int("ZITAT_MAX_CUE_MS", 5000)
+    bridge_gap_ms = args.bridge_gap_ms if args.bridge_gap_ms is not None else env_int("ZITAT_BRIDGE_GAP_MS", 800)
     translate_batch = args.translate_batch if args.translate_batch is not None else env_int("ZITAT_TRANSLATE_BATCH", 80)
     whisper_max_len = args.whisper_max_len if args.whisper_max_len is not None else env_int("ZITAT_WHISPER_MAX_LEN", 0)
     font = args.font if args.font is not None else env_str("ZITAT_FONT", "BM Dohyeon")
@@ -839,7 +865,7 @@ def main():
         if args.no_split:
             print("[5/7] Skipping cue splitting")
         else:
-            cues = step_split(cues, max_width, min_cue_ms)
+            cues = step_split(cues, max_width, min_cue_ms, bridge_gap_ms)
 
         final = os.path.join(tmpdir, "final.srt")
         with open(final, "w") as f:
